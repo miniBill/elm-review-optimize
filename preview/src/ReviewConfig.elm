@@ -13,9 +13,11 @@ when inside the directory containing this file.
 
 import Optimize
 import Review.Rule exposing (Rule)
+import Simplify
 
 
 config : List Rule
 config =
-    [ Optimize.rule
+    [ Simplify.rule
+    , Optimize.rule
     ]
