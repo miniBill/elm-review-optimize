@@ -1,6 +1,6 @@
 module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
 
-import Dict exposing (Dict)
+import Dict exposing (Dict, merge)
 import Elm.Syntax.Expression as Expression
 import Elm.Syntax.Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Location, Range)
@@ -358,8 +358,24 @@ toString value =
         Unit ->
             "()"
 
-        _ ->
-            MyDebug.todo "toString" "TODO"
+        Number ranges ->
+            "Number " ++ Union.unionToString ranges
+
+        String _ ->
+            MyDebug.todo "branch 'String _' not implemented" "TODO"
+
+        Char _ ->
+            MyDebug.todo "branch 'Char _' not implemented" "TODO"
+
+        Record _ ->
+            MyDebug.todo "branch 'Record _' not implemented" "TODO"
+
+        Bool b ->
+            if b then
+                "Bool True"
+
+            else
+                "Bool False"
 
 
 numericOp : (Interval -> Interval) -> Value -> Maybe Value
@@ -579,32 +595,54 @@ union lval rval =
         ( _, Bool _ ) ->
             Nothing
 
+        ( Record lr, Record rr ) ->
+            let
+                ( mergedFields, completeFields ) =
+                    Dict.merge
+                        (\_ _ ( acc, _ ) -> ( acc, False ))
+                        (\bk lv rv ( acc, accComplete ) ->
+                            case union lv rv of
+                                Nothing ->
+                                    ( acc, False )
+
+                                Just bv ->
+                                    ( Dict.insert bk bv acc, accComplete )
+                        )
+                        (\_ _ ( acc, _ ) -> ( acc, False ))
+                        lr.fields
+                        rr.fields
+                        ( Dict.empty, True )
+            in
+            Record
+                { isComplete =
+                    (lr.isComplete || rr.isComplete) && completeFields
+                , fields = mergedFields
+                }
+                |> Just
+
+        ( Record _, _ ) ->
+            Nothing
+
+        ( _, Record _ ) ->
+            Nothing
+
+        ( String (OneOfStrings ls), String (OneOfStrings rs) ) ->
+            Just <| String <| OneOfStrings <| Set.union ls rs
+
+        ( String (NoneOfStrings ls), String (NoneOfStrings rs) ) ->
+            Just <| String <| NoneOfStrings <| Set.intersect ls rs
+
         ( String _, String _ ) ->
             MyDebug.todo "branch '( String _, String _ )' not implemented" Nothing
 
-        ( Char _, String _ ) ->
-            MyDebug.todo "branch '( Char _, String _ )' not implemented" Nothing
+        ( _, String _ ) ->
+            Nothing
 
-        ( Record _, String _ ) ->
-            MyDebug.todo "branch '( Record _, String _ )' not implemented" Nothing
-
-        ( String _, Char _ ) ->
-            MyDebug.todo "branch '( String _, Char _ )' not implemented" Nothing
+        ( String _, _ ) ->
+            Nothing
 
         ( Char _, Char _ ) ->
             MyDebug.todo "branch '( Char _, Char _ )' not implemented" Nothing
-
-        ( Record _, Char _ ) ->
-            MyDebug.todo "branch '( Record _, Char _ )' not implemented" Nothing
-
-        ( String _, Record _ ) ->
-            MyDebug.todo "branch '( String _, Record _ )' not implemented" Nothing
-
-        ( Char _, Record _ ) ->
-            MyDebug.todo "branch '( Char _, Record _ )' not implemented" Nothing
-
-        ( Record _, Record _ ) ->
-            MyDebug.todo "branch '( Record _, Record _ )' not implemented" Nothing
 
 
 intersect : Value -> Value -> Maybe Value

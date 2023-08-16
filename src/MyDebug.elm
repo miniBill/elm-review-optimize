@@ -3,14 +3,26 @@ module MyDebug exposing (log, logWrap, todo, warn)
 
 log : String -> a -> a
 log msg value =
-    -- value
-    Debug.log msg value
+    let
+        _ =
+            Debug.log msg value
+
+        _ =
+            ()
+    in
+    value
 
 
 todo : String -> a -> a
 todo msg default =
-    -- warn msg default
-    Debug.todo msg
+    let
+        _ =
+            Debug.todo msg
+
+        -- _ =
+        --     log ("TODO: " ++ msg) ()
+    in
+    default
 
 
 warn : String -> a -> a
@@ -18,6 +30,9 @@ warn msg default =
     let
         _ =
             log ("WARN: " ++ msg) ()
+
+        _ =
+            ()
     in
     default
 
