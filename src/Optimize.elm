@@ -12,6 +12,7 @@ import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
 import Interval
 import Maybe.Extra
+import MyDebug
 import RangeDict exposing (RangeDict)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
@@ -140,7 +141,7 @@ expressionVisitor ((Node range expression) as node) context =
                                             iv
 
                                         Nothing ->
-                                            Debug.todo "Intersection during inference should never fail"
+                                            MyDebug.todo "Intersection during inference should never fail" v
                                     )
                                     acc
                             )
@@ -226,6 +227,7 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
 
         Nothing ->
             let
+                nodeToInference : Node Expression -> Maybe (Value -> Dict String Value)
                 nodeToInference (Node _ child) =
                     case child of
                         RecordAccess (Node _ (FunctionOrValue [] name)) (Node _ fieldName) ->
@@ -250,6 +252,10 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                         (nodeToInference ichild)
                         (Value.getValue vchild current)
 
+                branches :
+                    (Value -> Dict String Value)
+                    -> Value
+                    -> List ( Range, Dict String Value )
                 branches toInference value =
                     [ ( trueRange
                       , toInference value
@@ -274,6 +280,7 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                                     )
                                     |> Union.fromInterval
                                     |> Value.Number
+                                    |> MyDebug.log "isLessThan"
                             )
 
                 isMoreThan : { equal : Bool } -> Value -> Maybe Value
@@ -291,6 +298,7 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                                     (Interval.excludes (1 / 0))
                                     |> Union.fromInterval
                                     |> Value.Number
+                                    |> MyDebug.log "isMoreThan"
                             )
 
                 disequation :
@@ -308,6 +316,10 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                                     []
 
                                 Just f ->
+                                    let
+                                        _ =
+                                            MyDebug.log "after straight" []
+                                    in
                                     branches toInference f
 
                         Nothing ->
@@ -337,17 +349,15 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                             branches toInference value
 
                         Nothing ->
-                            let
-                                _ =
-                                    Debug.todo <|
-                                        "At line "
-                                            ++ String.fromInt condRange.start.row
-                                            ++ ": "
-                                            ++ Syntax.expressionToString lchild
-                                            ++ " == "
-                                            ++ Syntax.expressionToString rchild
-                            in
-                            []
+                            MyDebug.warn
+                                ("At line "
+                                    ++ String.fromInt condRange.start.row
+                                    ++ ": "
+                                    ++ Syntax.expressionToString lchild
+                                    ++ " == "
+                                    ++ Syntax.expressionToString rchild
+                                )
+                                []
 
                 OperatorApplication "<" _ lchild rchild ->
                     disequation { equal = False } isLessThan isMoreThan lchild rchild
@@ -362,11 +372,7 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                     disequation { equal = True } isMoreThan isLessThan lchild rchild
 
                 _ ->
-                    let
-                        _ =
-                            Debug.todo
-                    in
-                    []
+                    MyDebug.warn "visitIfBlock" []
 
 
 tryValue : Node Expression -> Inferred -> Maybe String

@@ -3,9 +3,11 @@ module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..
 import Dict exposing (Dict)
 import Elm.Syntax.Expression as Expression
 import Elm.Syntax.Node exposing (Node(..))
+import Elm.Syntax.Range exposing (Location, Range)
 import Interval exposing (Interval)
 import Interval.Extra as Interval exposing (Bound)
 import List.Extra
+import MyDebug
 import Set exposing (Set)
 import Syntax
 import Union exposing (Union)
@@ -217,7 +219,7 @@ getValue (Node range expression) context =
                             Maybe.map invert <| getValueForEquals lvalue rvalue
 
                         "&&" ->
-                            getValueForBoolean (&&) lvalue rvalue
+                            booleanOp2 (&&) lvalue rvalue
 
                         "<" ->
                             if isLessThan lvalue rvalue then
@@ -266,67 +268,46 @@ getValue (Node range expression) context =
                             numericOp2 Interval.minus lvalue rvalue
 
                         _ ->
-                            let
-                                _ =
-                                    if Dict.isEmpty context then
-                                        Nothing
+                            (if Dict.isEmpty context then
+                                identity
 
-                                    else
-                                        Debug.todo <|
-                                            "Operator application ("
-                                                ++ op
-                                                ++ ")\n  lchild = "
-                                                ++ Syntax.expressionToString lchild
-                                                ++ "\n  lvalue = "
-                                                ++ Debug.toString lvalue
-                                                ++ "\n  rchild = "
-                                                ++ Syntax.expressionToString rchild
-                                                ++ "\n  rvalue = "
-                                                ++ Debug.toString rvalue
-                                                ++ "\n  context = "
-                                                ++ Debug.toString (Dict.toList context)
-                                                ++ "\n range = "
-                                                ++ Debug.toString range
-                            in
-                            Nothing
+                             else
+                                MyDebug.warn
+                                    ("Operator application ("
+                                        ++ op
+                                        ++ ")\n  lchild = "
+                                        ++ Syntax.expressionToString lchild
+                                        ++ "\n  lvalue = "
+                                        ++ toString lvalue
+                                        ++ "\n  rchild = "
+                                        ++ Syntax.expressionToString rchild
+                                        ++ "\n  rvalue = "
+                                        ++ toString rvalue
+                                        ++ "\n  context = "
+                                        ++ contextToString context
+                                        ++ "\n range = "
+                                        ++ rangeToString range
+                                    )
+                            )
+                                Nothing
 
                 _ ->
                     Nothing
 
         Expression.ListExpr _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            Nothing
+            MyDebug.warn "getValue > ListExpr" Nothing
 
         Expression.LetExpression _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            Nothing
+            MyDebug.warn "getValue > LetExpression" Nothing
 
         Expression.CaseExpression _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            Nothing
+            MyDebug.warn "getValue > CaseExpression" Nothing
 
         Expression.RecordExpr _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            Nothing
+            MyDebug.warn "getValue > RecordExpr" Nothing
 
         Expression.RecordUpdateExpression _ _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            Nothing
+            MyDebug.warn "getValue > RecordUpdateExpression" Nothing
 
         Expression.LambdaExpression _ ->
             Nothing
@@ -348,6 +329,35 @@ getValue (Node range expression) context =
 
         Expression.TupledExpression _ ->
             Nothing
+
+
+rangeToString : Range -> String
+rangeToString { start, end } =
+    "( " ++ locationToString start ++ " - " ++ locationToString end ++ " )"
+
+
+locationToString : Location -> String
+locationToString location =
+    String.fromInt location.row ++ ":" ++ String.fromInt location.column
+
+
+contextToString : Dict String Value -> String
+contextToString context =
+    context
+        |> Dict.toList
+        |> List.map (\( k, v ) -> k ++ " = " ++ toString v ++ " ")
+        |> String.join ","
+        |> (\s -> "( " ++ s ++ ")")
+
+
+toString : Value -> String
+toString value =
+    case value of
+        Unit ->
+            "()"
+
+        _ ->
+            MyDebug.todo "toString" "TODO"
 
 
 numericOp : (Interval -> Interval) -> Value -> Maybe Value
@@ -436,22 +446,28 @@ getMin value =
             Nothing
 
 
-getValueForBoolean : (Bool -> Bool -> Bool) -> Value -> Value -> Maybe Value
-getValueForBoolean f l r =
+booleanOp2 :
+    (Bool -> Bool -> Bool)
+    -> Value
+    -> Value
+    -> Maybe Value
+booleanOp2 f l r =
     case ( l, r ) of
         ( Bool lb, Bool rb ) ->
             Just <| Bool (f lb rb)
 
         _ ->
-            Debug.todo <|
-                "Cannot apply boolean to values "
-                    ++ Debug.toString l
-                    ++ " and "
-                    ++ Debug.toString r
+            Nothing
 
 
 getValueForEquals : Value -> Value -> Maybe Value
 getValueForEquals lvalue rvalue =
+    let
+        optionsToString options =
+            options
+                |> Set.toList
+                |> String.join ", "
+    in
     case ( lvalue, rvalue ) of
         ( String (NoneOfStrings loptions), String (OneOfStrings roptions) ) ->
             case Set.toList roptions of
@@ -463,26 +479,22 @@ getValueForEquals lvalue rvalue =
                         Nothing
 
                     else
-                        let
-                            _ =
-                                Debug.todo <|
-                                    "Operator application (==)\n  loptions = None of "
-                                        ++ Debug.toString (Set.toList loptions)
-                                        ++ "\n  roptions = One of "
-                                        ++ Debug.toString [ roption ]
-                        in
-                        Nothing
+                        MyDebug.warn
+                            ("Operator application (==)\n  loptions = None of "
+                                ++ optionsToString loptions
+                                ++ "\n  roptions = One of "
+                                ++ optionsToString roptions
+                            )
+                            Nothing
 
                 _ ->
-                    let
-                        _ =
-                            Debug.todo <|
-                                "Operator application (==)\n  loptions = None of "
-                                    ++ Debug.toString (Set.toList loptions)
-                                    ++ "\n  roptions = One of "
-                                    ++ Debug.toString (Set.toList roptions)
-                    in
-                    Nothing
+                    MyDebug.warn
+                        ("Operator application (==)\n  loptions = None of "
+                            ++ optionsToString loptions
+                            ++ "\n  roptions = One of "
+                            ++ optionsToString roptions
+                        )
+                        Nothing
 
         ( String (OneOfStrings loptions), String (NoneOfStrings roptions) ) ->
             case Set.toList loptions of
@@ -491,26 +503,22 @@ getValueForEquals lvalue rvalue =
                         Just <| Bool False
 
                     else
-                        let
-                            _ =
-                                Debug.todo <|
-                                    "Operator application (==)\n  loptions = One of "
-                                        ++ Debug.toString [ loption ]
-                                        ++ "\n  roptions = None of "
-                                        ++ Debug.toString (Set.toList roptions)
-                        in
-                        Nothing
+                        MyDebug.warn
+                            ("Operator application (==)\n  loptions = One of "
+                                ++ optionsToString loptions
+                                ++ "\n  roptions = None of "
+                                ++ optionsToString roptions
+                            )
+                            Nothing
 
                 _ ->
-                    let
-                        _ =
-                            Debug.todo <|
-                                "Operator application (==)\n  loptions = One of "
-                                    ++ Debug.toString (Set.toList loptions)
-                                    ++ "\n  roptions = None of "
-                                    ++ Debug.toString (Set.toList roptions)
-                    in
-                    Nothing
+                    MyDebug.warn
+                        ("Operator application (==)\n  loptions = One of "
+                            ++ optionsToString loptions
+                            ++ "\n  roptions = None of "
+                            ++ optionsToString roptions
+                        )
+                        Nothing
 
         ( String (OneOfStrings loptions), String (OneOfStrings roptions) ) ->
             case Set.toList loptions of
@@ -526,15 +534,13 @@ getValueForEquals lvalue rvalue =
                     Nothing
 
         _ ->
-            let
-                _ =
-                    Debug.todo <|
-                        "Operator application (==)\n  lvalue = "
-                            ++ Debug.toString lvalue
-                            ++ "\n  rvalue = "
-                            ++ Debug.toString rvalue
-            in
-            Nothing
+            MyDebug.warn
+                ("Operator application (==)\n  lvalue = "
+                    ++ toString lvalue
+                    ++ "\n  rvalue = "
+                    ++ toString rvalue
+                )
+                Nothing
 
 
 union : Value -> Value -> Maybe Value
@@ -571,8 +577,32 @@ union lval rval =
         ( _, Bool _ ) ->
             Nothing
 
-        _ ->
-            Debug.todo <| "TODO (" ++ Debug.toString lval ++ ", " ++ Debug.toString rval ++ ")"
+        ( String _, String _ ) ->
+            MyDebug.todo "branch '( String _, String _ )' not implemented" Nothing
+
+        ( Char _, String _ ) ->
+            MyDebug.todo "branch '( Char _, String _ )' not implemented" Nothing
+
+        ( Record _, String _ ) ->
+            MyDebug.todo "branch '( Record _, String _ )' not implemented" Nothing
+
+        ( String _, Char _ ) ->
+            MyDebug.todo "branch '( String _, Char _ )' not implemented" Nothing
+
+        ( Char _, Char _ ) ->
+            MyDebug.todo "branch '( Char _, Char _ )' not implemented" Nothing
+
+        ( Record _, Char _ ) ->
+            MyDebug.todo "branch '( Record _, Char _ )' not implemented" Nothing
+
+        ( String _, Record _ ) ->
+            MyDebug.todo "branch '( String _, Record _ )' not implemented" Nothing
+
+        ( Char _, Record _ ) ->
+            MyDebug.todo "branch '( Char _, Record _ )' not implemented" Nothing
+
+        ( Record _, Record _ ) ->
+            MyDebug.todo "branch '( Record _, Record _ )' not implemented" Nothing
 
 
 intersect : Value -> Value -> Maybe Value
