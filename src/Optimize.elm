@@ -103,154 +103,163 @@ expressionExitVisitor _ context =
 
 expressionVisitor : Node Expression -> ModuleContext -> ( List (Error {}), ModuleContext )
 expressionVisitor ((Node range expression) as node) context =
-    let
-        current : Inferred
-        current =
-            RangeDict.get range context.current.rangesDict
-                |> Maybe.withDefault context.current.inferred
+    MyDebug.logWrap 0 "expressionVisitor" <|
+        \indent ->
+            let
+                current : Inferred
+                current =
+                    RangeDict.get range context.current.rangesDict
+                        |> Maybe.withDefault context.current.inferred
 
-        pushNothing :
-            List (Error {})
-            -> ( List (Error {}), ModuleContext )
-        pushNothing v =
-            ( v
-            , { context
-                | current =
-                    { inferred = current
-                    , rangesDict = context.current.rangesDict
-                    }
-                , stack = context.current :: context.stack
-              }
-            )
+                pushNothing :
+                    List (Error {})
+                    -> ( List (Error {}), ModuleContext )
+                pushNothing v =
+                    ( v
+                    , { context
+                        | current =
+                            { inferred = current
+                            , rangesDict = context.current.rangesDict
+                            }
+                        , stack = context.current :: context.stack
+                      }
+                    )
 
-        push :
-            ( List (Error {}), List ( Range, Inferred ) )
-            -> ( List (Error {}), ModuleContext )
-        push ( errors, newRanges ) =
-            ( errors
-            , { context
-                | current =
-                    { inferred = current
-                    , rangesDict =
-                        List.foldl
-                            (\( k, v ) acc ->
-                                RangeDict.insert
-                                    k
-                                    (case Value.intersectDicts v current of
-                                        Just iv ->
-                                            iv
+                push :
+                    ( List (Error {}), List ( Range, Inferred ) )
+                    -> ( List (Error {}), ModuleContext )
+                push ( errors, newRanges ) =
+                    ( errors
+                    , { context
+                        | current =
+                            { inferred = current
+                            , rangesDict =
+                                List.foldl
+                                    (\( k, v ) acc ->
+                                        RangeDict.insert
+                                            k
+                                            (case Value.intersectDicts v current of
+                                                Just iv ->
+                                                    iv
 
-                                        Nothing ->
-                                            MyDebug.todo "Intersection during inference should never fail" v
+                                                Nothing ->
+                                                    MyDebug.todo "Intersection during inference should never fail" v
+                                            )
+                                            acc
                                     )
-                                    acc
-                            )
-                            context.current.rangesDict
-                            newRanges
-                    }
-                , stack = context.current :: context.stack
-              }
-            )
-    in
-    case expression of
-        RecordAccess record field ->
-            case Node.value (Syntax.removeParens record) of
-                LetExpression _ ->
-                    pushNothing (distributeFieldAccess "a let/in" record field)
+                                    context.current.rangesDict
+                                    newRanges
+                            }
+                        , stack = context.current :: context.stack
+                      }
+                    )
+            in
+            case expression of
+                RecordAccess record field ->
+                    case Node.value (Syntax.removeParens record) of
+                        LetExpression _ ->
+                            pushNothing (distributeFieldAccess "a let/in" record field)
 
-                IfBlock _ _ _ ->
-                    pushNothing (distributeFieldAccess "an if/then/else" record field)
+                        IfBlock _ _ _ ->
+                            pushNothing (distributeFieldAccess "an if/then/else" record field)
 
-                CaseExpression _ ->
-                    pushNothing (distributeFieldAccess "a case/of" record field)
+                        CaseExpression _ ->
+                            pushNothing (distributeFieldAccess "a case/of" record field)
+
+                        _ ->
+                            case tryValue indent node current of
+                                Just value ->
+                                    pushNothing (isConstant value range)
+
+                                Nothing ->
+                                    pushNothing []
+
+                OperatorApplication opName _ leftChild rightChild ->
+                    case tryValue indent node current of
+                        Just value ->
+                            pushNothing (isConstant value range)
+
+                        Nothing ->
+                            pushNothing (operatorApplicationVisitor indent range opName leftChild rightChild current)
+
+                Literal _ ->
+                    pushNothing []
+
+                CharLiteral _ ->
+                    pushNothing []
+
+                Hex _ ->
+                    pushNothing []
+
+                Integer _ ->
+                    pushNothing []
+
+                Floatable _ ->
+                    pushNothing []
+
+                UnitExpr ->
+                    pushNothing []
+
+                ListExpr _ ->
+                    pushNothing []
+
+                IfBlock cond true false ->
+                    case tryValue indent node current of
+                        Just value ->
+                            pushNothing (isConstant value range)
+
+                        Nothing ->
+                            MyDebug.logWrap indent "push(visitIfBlock)" <|
+                                \indent_ ->
+                                    push ( [], visitIfBlock indent_ cond true false current )
 
                 _ ->
-                    case tryValue node current of
+                    case tryValue indent node current of
                         Just value ->
                             pushNothing (isConstant value range)
 
                         Nothing ->
                             pushNothing []
 
-        OperatorApplication opName _ leftChild rightChild ->
-            case tryValue node current of
-                Just value ->
-                    pushNothing (isConstant value range)
 
-                Nothing ->
-                    pushNothing (operatorApplicationVisitor range opName leftChild rightChild current)
-
-        Literal _ ->
-            pushNothing []
-
-        CharLiteral _ ->
-            pushNothing []
-
-        Hex _ ->
-            pushNothing []
-
-        Integer _ ->
-            pushNothing []
-
-        Floatable _ ->
-            pushNothing []
-
-        UnitExpr ->
-            pushNothing []
-
-        ListExpr _ ->
-            pushNothing []
-
-        IfBlock cond true false ->
-            case tryValue node current of
-                Just value ->
-                    pushNothing (isConstant value range)
-
-                Nothing ->
-                    push ( [], visitIfBlock cond true false current )
-
-        _ ->
-            case tryValue node current of
-                Just value ->
-                    pushNothing (isConstant value range)
-
-                Nothing ->
-                    pushNothing []
-
-
-visitIfBlock : Node Expression -> Node Expression -> Node Expression -> Inferred -> List ( Range, Inferred )
-visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseRange _) current =
-    case Value.getValue condNode current of
+visitIfBlock : Int -> Node Expression -> Node Expression -> Node Expression -> Inferred -> List ( Range, Inferred )
+visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node falseRange _) current =
+    case Value.getValue indent condNode current of
         Just _ ->
             -- This will be handled when visiting the child
             []
 
         Nothing ->
             let
-                nodeToInference : Node Expression -> Maybe (Value -> Dict String Value)
-                nodeToInference (Node _ child) =
-                    case child of
-                        RecordAccess (Node _ (FunctionOrValue [] name)) (Node _ fieldName) ->
-                            Just <|
-                                \v ->
-                                    Dict.singleton name
-                                        (Value.Record
-                                            { isComplete = False
-                                            , fields = Dict.singleton fieldName v
-                                            }
-                                        )
+                nodeToInference : Int -> Node Expression -> Maybe (Value -> Dict String Value)
+                nodeToInference indent_ (Node _ child) =
+                    MyDebug.logWrap indent_ "nodeToInference" <|
+                        \_ ->
+                            case child of
+                                RecordAccess (Node _ (FunctionOrValue [] name)) (Node _ fieldName) ->
+                                    Just <|
+                                        \v ->
+                                            Dict.singleton name
+                                                (Value.Record
+                                                    { isComplete = False
+                                                    , fields = Dict.singleton fieldName v
+                                                    }
+                                                )
 
-                        _ ->
-                            Nothing
+                                _ ->
+                                    Nothing
 
                 inferenceAndValue :
-                    Node Expression
+                    Int
+                    -> Node Expression
                     -> Node Expression
                     -> Maybe ( Value -> Dict String Value, Value )
-                inferenceAndValue ichild vchild =
-                    Maybe.map2 Tuple.pair
-                        (nodeToInference ichild)
-                        (Value.getValue vchild current)
+                inferenceAndValue indent_ ichild vchild =
+                    MyDebug.logWrap indent_ "inferenceAndValue" <|
+                        \indent__ ->
+                            Maybe.map2 Tuple.pair
+                                (nodeToInference indent__ ichild)
+                                (Value.getValue indent__ vchild current)
 
                 branches :
                     (Value -> Dict String Value)
@@ -302,30 +311,25 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                             )
 
                 disequation :
-                    { equal : Bool }
+                    Int
+                    -> { equal : Bool }
                     -> ({ equal : Bool } -> Value -> Maybe Value)
                     -> ({ equal : Bool } -> Value -> Maybe Value)
                     -> Node Expression
                     -> Node Expression
                     -> List ( Range, Dict String Value )
-                disequation equal straight reversed lchild rchild =
-                    case inferenceAndValue lchild rchild of
-                        Just ( toInference, rvalue ) ->
-                            case straight equal rvalue of
-                                Nothing ->
-                                    []
-
-                                Just f ->
-                                    let
-                                        _ =
-                                            MyDebug.log "after straight" []
-                                    in
-                                    branches toInference f
-
-                        Nothing ->
-                            case inferenceAndValue rchild lchild of
-                                Just ( toInference, lvalue ) ->
-                                    case reversed equal lvalue of
+                disequation indent_ equal straight reversed lchild rchild =
+                    MyDebug.logWrap indent_ "disequation" <|
+                        \indent__ ->
+                            case inferenceAndValue indent__ lchild rchild of
+                                Just ( toInference, rvalue ) ->
+                                    case
+                                        MyDebug.logWrap indent__
+                                            "straight"
+                                            (\_ ->
+                                                straight equal rvalue
+                                            )
+                                    of
                                         Nothing ->
                                             []
 
@@ -333,16 +337,26 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                                             branches toInference f
 
                                 Nothing ->
-                                    []
+                                    case inferenceAndValue indent__ rchild lchild of
+                                        Just ( toInference, lvalue ) ->
+                                            case reversed equal lvalue of
+                                                Nothing ->
+                                                    []
+
+                                                Just f ->
+                                                    branches toInference f
+
+                                        Nothing ->
+                                            []
             in
             case cond of
                 OperatorApplication "==" _ lchild rchild ->
                     let
                         inferenceAndValues : Maybe ( Value -> Dict String Value, Value )
                         inferenceAndValues =
-                            inferenceAndValue lchild rchild
+                            inferenceAndValue indent lchild rchild
                                 |> Maybe.Extra.orElseLazy
-                                    (\_ -> inferenceAndValue lchild rchild)
+                                    (\_ -> inferenceAndValue indent lchild rchild)
                     in
                     case inferenceAndValues of
                         Just ( toInference, value ) ->
@@ -360,38 +374,41 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                                 []
 
                 OperatorApplication "<" _ lchild rchild ->
-                    disequation { equal = False } isLessThan isMoreThan lchild rchild
+                    disequation indent { equal = False } isLessThan isMoreThan lchild rchild
 
                 OperatorApplication "<=" _ lchild rchild ->
-                    disequation { equal = True } isLessThan isMoreThan lchild rchild
+                    disequation indent { equal = True } isLessThan isMoreThan lchild rchild
 
                 OperatorApplication ">" _ lchild rchild ->
-                    disequation { equal = False } isMoreThan isLessThan lchild rchild
+                    disequation indent { equal = False } isMoreThan isLessThan lchild rchild
 
                 OperatorApplication ">=" _ lchild rchild ->
-                    disequation { equal = True } isMoreThan isLessThan lchild rchild
+                    disequation indent { equal = True } isMoreThan isLessThan lchild rchild
 
                 _ ->
                     MyDebug.warn "visitIfBlock" []
 
 
-tryValue : Node Expression -> Inferred -> Maybe String
-tryValue node current =
-    Value.getValue node current
-        |> Maybe.andThen
-            (\value ->
-                Maybe.map Value.singleToString (Value.toSingle value)
-            )
+tryValue : Int -> Node Expression -> Inferred -> Maybe String
+tryValue indent node current =
+    MyDebug.logWrap indent "tryValue" <|
+        \indent_ ->
+            Value.getValue indent_ node current
+                |> Maybe.andThen
+                    (\value ->
+                        Maybe.map Value.singleToString (Value.toSingle value)
+                    )
 
 
 operatorApplicationVisitor :
-    Range
+    Int
+    -> Range
     -> String
     -> Node Expression
     -> Node Expression
     -> Inferred
     -> List (Error {})
-operatorApplicationVisitor range opName leftChild rightChild context =
+operatorApplicationVisitor indent range opName leftChild rightChild context =
     case trySimplify opName leftChild rightChild of
         Just value ->
             isConstant value range
@@ -400,7 +417,7 @@ operatorApplicationVisitor range opName leftChild rightChild context =
             case leftChild of
                 Node _ (OperatorApplication lopName lopInfix _ lrchild) ->
                     if opName == lopName && isAssociative opName then
-                        case tryValue (Node range (OperatorApplication opName lopInfix lrchild rightChild)) context of
+                        case tryValue indent (Node range (OperatorApplication opName lopInfix lrchild rightChild)) context of
                             Just value ->
                                 isConstant value
                                     { start = (Node.range lrchild).start

@@ -146,189 +146,191 @@ toRecordSetter ( k, v ) =
         )
 
 
-getValue : Node Expression.Expression -> Dict String Value -> Maybe Value
-getValue (Node range expression) context =
-    case expression of
-        Expression.UnitExpr ->
-            Just Unit
+getValue : Int -> Node Expression.Expression -> Dict String Value -> Maybe Value
+getValue indent ((Node range expression) as node) context =
+    MyDebug.logWrap indent ("getValue " ++ Syntax.expressionToString node) <|
+        \indent_ ->
+            case expression of
+                Expression.UnitExpr ->
+                    Just Unit
 
-        Expression.Literal s ->
-            Just (String (OneOfStrings <| Set.singleton s))
+                Expression.Literal s ->
+                    Just (String (OneOfStrings <| Set.singleton s))
 
-        Expression.CharLiteral c ->
-            Just (Char (OneOfChars <| Set.singleton c))
+                Expression.CharLiteral c ->
+                    Just (Char (OneOfChars <| Set.singleton c))
 
-        Expression.Integer i ->
-            Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat i
+                Expression.Integer i ->
+                    Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat i
 
-        Expression.Hex h ->
-            Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat h
+                Expression.Hex h ->
+                    Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat h
 
-        Expression.Floatable f ->
-            Just <| Number <| Union.fromInterval <| Interval.degenerate f
+                Expression.Floatable f ->
+                    Just <| Number <| Union.fromInterval <| Interval.degenerate f
 
-        Expression.FunctionOrValue [] name ->
-            Dict.get name context
+                Expression.FunctionOrValue [] name ->
+                    Dict.get name context
 
-        Expression.FunctionOrValue _ _ ->
-            Nothing
+                Expression.FunctionOrValue _ _ ->
+                    Nothing
 
-        Expression.RecordAccess child (Node _ field) ->
-            getValue child context
-                |> Maybe.andThen
-                    (\childValue ->
-                        case childValue of
-                            Record { fields } ->
-                                Dict.get field fields
+                Expression.RecordAccess child (Node _ field) ->
+                    getValue indent_ child context
+                        |> Maybe.andThen
+                            (\childValue ->
+                                case childValue of
+                                    Record { fields } ->
+                                        Dict.get field fields
 
-                            _ ->
-                                Nothing
-                    )
+                                    _ ->
+                                        Nothing
+                            )
 
-        Expression.Negation child ->
-            getValue child context
-                |> Maybe.andThen (numericOp Interval.negate)
+                Expression.Negation child ->
+                    getValue indent_ child context
+                        |> Maybe.andThen (numericOp Interval.negate)
 
-        Expression.ParenthesizedExpression child ->
-            getValue child context
+                Expression.ParenthesizedExpression child ->
+                    getValue indent_ child context
 
-        Expression.IfBlock c t f ->
-            case getValue c context of
-                Just (Bool True) ->
-                    getValue t context
+                Expression.IfBlock c t f ->
+                    case getValue indent_ c context of
+                        Just (Bool True) ->
+                            getValue indent_ t context
 
-                Just (Bool False) ->
-                    getValue f context
+                        Just (Bool False) ->
+                            getValue indent_ f context
 
-                _ ->
-                    case ( getValue t context, getValue f context ) of
-                        ( Just tv, Just fv ) ->
-                            union tv fv
+                        _ ->
+                            case ( getValue indent_ t context, getValue indent_ f context ) of
+                                ( Just tv, Just fv ) ->
+                                    union tv fv
+
+                                _ ->
+                                    Nothing
+
+                Expression.OperatorApplication op _ lchild rchild ->
+                    case ( getValue indent_ lchild context, getValue indent_ rchild context ) of
+                        ( Just lvalue, Just rvalue ) ->
+                            case op of
+                                "==" ->
+                                    getValueForEquals lvalue rvalue
+
+                                "/=" ->
+                                    Maybe.map invert <| getValueForEquals lvalue rvalue
+
+                                "&&" ->
+                                    booleanOp2 (&&) lvalue rvalue
+
+                                "<" ->
+                                    if isLessThan lvalue rvalue then
+                                        Just <| Bool True
+
+                                    else if isMoreThanOrEqualTo lvalue rvalue then
+                                        Just <| Bool False
+
+                                    else
+                                        Nothing
+
+                                "<=" ->
+                                    if isLessThanOrEqualTo lvalue rvalue then
+                                        Just <| Bool True
+
+                                    else if isMoreThan lvalue rvalue then
+                                        Just <| Bool False
+
+                                    else
+                                        Nothing
+
+                                ">" ->
+                                    if isMoreThan lvalue rvalue then
+                                        Just <| Bool True
+
+                                    else if isLessThanOrEqualTo lvalue rvalue then
+                                        Just <| Bool False
+
+                                    else
+                                        Nothing
+
+                                ">=" ->
+                                    if isMoreThanOrEqualTo lvalue rvalue then
+                                        Just <| Bool True
+
+                                    else if isLessThan lvalue rvalue then
+                                        Just <| Bool False
+
+                                    else
+                                        Nothing
+
+                                "+" ->
+                                    numericOp2 Interval.plus lvalue rvalue
+
+                                "-" ->
+                                    numericOp2 Interval.minus lvalue rvalue
+
+                                _ ->
+                                    (if Dict.isEmpty context then
+                                        identity
+
+                                     else
+                                        MyDebug.warn
+                                            ("Operator application ("
+                                                ++ op
+                                                ++ ")\n  lchild = "
+                                                ++ Syntax.expressionToString lchild
+                                                ++ "\n  lvalue = "
+                                                ++ toString lvalue
+                                                ++ "\n  rchild = "
+                                                ++ Syntax.expressionToString rchild
+                                                ++ "\n  rvalue = "
+                                                ++ toString rvalue
+                                                ++ "\n  context = "
+                                                ++ contextToString context
+                                                ++ "\n range = "
+                                                ++ rangeToString range
+                                            )
+                                    )
+                                        Nothing
 
                         _ ->
                             Nothing
 
-        Expression.OperatorApplication op _ lchild rchild ->
-            case ( getValue lchild context, getValue rchild context ) of
-                ( Just lvalue, Just rvalue ) ->
-                    case op of
-                        "==" ->
-                            getValueForEquals lvalue rvalue
+                Expression.ListExpr _ ->
+                    MyDebug.warn "getValue > ListExpr" Nothing
 
-                        "/=" ->
-                            Maybe.map invert <| getValueForEquals lvalue rvalue
+                Expression.LetExpression _ ->
+                    MyDebug.warn "getValue > LetExpression" Nothing
 
-                        "&&" ->
-                            booleanOp2 (&&) lvalue rvalue
+                Expression.CaseExpression _ ->
+                    MyDebug.warn "getValue > CaseExpression" Nothing
 
-                        "<" ->
-                            if isLessThan lvalue rvalue then
-                                Just <| Bool True
+                Expression.RecordExpr _ ->
+                    MyDebug.warn "getValue > RecordExpr" Nothing
 
-                            else if isMoreThanOrEqualTo lvalue rvalue then
-                                Just <| Bool False
+                Expression.RecordUpdateExpression _ _ ->
+                    MyDebug.warn "getValue > RecordUpdateExpression" Nothing
 
-                            else
-                                Nothing
-
-                        "<=" ->
-                            if isLessThanOrEqualTo lvalue rvalue then
-                                Just <| Bool True
-
-                            else if isMoreThan lvalue rvalue then
-                                Just <| Bool False
-
-                            else
-                                Nothing
-
-                        ">" ->
-                            if isMoreThan lvalue rvalue then
-                                Just <| Bool True
-
-                            else if isLessThanOrEqualTo lvalue rvalue then
-                                Just <| Bool False
-
-                            else
-                                Nothing
-
-                        ">=" ->
-                            if isMoreThanOrEqualTo lvalue rvalue then
-                                Just <| Bool True
-
-                            else if isLessThan lvalue rvalue then
-                                Just <| Bool False
-
-                            else
-                                Nothing
-
-                        "+" ->
-                            numericOp2 Interval.plus lvalue rvalue
-
-                        "-" ->
-                            numericOp2 Interval.minus lvalue rvalue
-
-                        _ ->
-                            (if Dict.isEmpty context then
-                                identity
-
-                             else
-                                MyDebug.warn
-                                    ("Operator application ("
-                                        ++ op
-                                        ++ ")\n  lchild = "
-                                        ++ Syntax.expressionToString lchild
-                                        ++ "\n  lvalue = "
-                                        ++ toString lvalue
-                                        ++ "\n  rchild = "
-                                        ++ Syntax.expressionToString rchild
-                                        ++ "\n  rvalue = "
-                                        ++ toString rvalue
-                                        ++ "\n  context = "
-                                        ++ contextToString context
-                                        ++ "\n range = "
-                                        ++ rangeToString range
-                                    )
-                            )
-                                Nothing
-
-                _ ->
+                Expression.LambdaExpression _ ->
                     Nothing
 
-        Expression.ListExpr _ ->
-            MyDebug.warn "getValue > ListExpr" Nothing
+                Expression.RecordAccessFunction _ ->
+                    Nothing
 
-        Expression.LetExpression _ ->
-            MyDebug.warn "getValue > LetExpression" Nothing
+                Expression.GLSLExpression _ ->
+                    Nothing
 
-        Expression.CaseExpression _ ->
-            MyDebug.warn "getValue > CaseExpression" Nothing
+                Expression.PrefixOperator _ ->
+                    Nothing
 
-        Expression.RecordExpr _ ->
-            MyDebug.warn "getValue > RecordExpr" Nothing
+                Expression.Application _ ->
+                    Nothing
 
-        Expression.RecordUpdateExpression _ _ ->
-            MyDebug.warn "getValue > RecordUpdateExpression" Nothing
+                Expression.Operator _ ->
+                    Nothing
 
-        Expression.LambdaExpression _ ->
-            Nothing
-
-        Expression.RecordAccessFunction _ ->
-            Nothing
-
-        Expression.GLSLExpression _ ->
-            Nothing
-
-        Expression.PrefixOperator _ ->
-            Nothing
-
-        Expression.Application _ ->
-            Nothing
-
-        Expression.Operator _ ->
-            Nothing
-
-        Expression.TupledExpression _ ->
-            Nothing
+                Expression.TupledExpression _ ->
+                    Nothing
 
 
 rangeToString : Range -> String

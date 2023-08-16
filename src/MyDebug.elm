@@ -1,4 +1,4 @@
-module MyDebug exposing (log, todo, warn)
+module MyDebug exposing (log, logWrap, todo, warn)
 
 
 log : String -> a -> a
@@ -20,3 +20,25 @@ warn msg default =
             log ("WARN: " ++ msg) ()
     in
     default
+
+
+logIndent : Int -> String -> a -> a
+logIndent indent msg =
+    log (String.repeat indent "  " ++ msg)
+
+
+logWrap : Int -> String -> (Int -> a) -> a
+logWrap indent name f =
+    let
+        _ =
+            logIndent indent name ()
+    in
+    let
+        result =
+            f (indent + 1)
+    in
+    let
+        _ =
+            logIndent indent (name ++ " done") ()
+    in
+    result
