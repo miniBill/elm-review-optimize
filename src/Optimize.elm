@@ -10,6 +10,7 @@ import Dict exposing (Dict)
 import Elm.Syntax.Expression exposing (Expression(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
+import Maybe.Extra
 import RangeDict exposing (RangeDict)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
@@ -215,74 +216,81 @@ expressionVisitor ((Node range expression) as node) context =
 
 
 visitIfBlock : Node Expression -> Node Expression -> Node Expression -> Inferred -> List ( Range, Inferred )
-visitIfBlock (Node _ cond) (Node trueRange true) (Node falseRange false) current =
-    case cond of
-        OperatorApplication "==" _ (Node _ lchild) rchild ->
-            case Value.getValue rchild current of
-                Nothing ->
-                    let
-                        _ =
-                            -- Handle possible Yoda conditions by checking getValue lchild
-                            Debug.todo
-                    in
-                    []
+visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseRange _) current =
+    case Value.getValue condNode current of
+        Just _ ->
+            -- This will be handled when visiting the child
+            []
 
-                Just rvalue ->
-                    case lchild of
+        Nothing ->
+            let
+                nodeToInference (Node _ child) =
+                    case child of
                         RecordAccess (Node _ (FunctionOrValue [] name)) (Node _ fieldName) ->
-                            let
-                                inverted : Value
-                                inverted =
-                                    Value.invert rvalue
-                            in
-                            [ ( trueRange
-                              , Dict.singleton name
-                                    (Value.Record
-                                        { isComplete = False
-                                        , fields = Dict.singleton fieldName rvalue
-                                        }
+                            Just <|
+                                \v ->
+                                    Dict.singleton name
+                                        (Value.Record
+                                            { isComplete = False
+                                            , fields = Dict.singleton fieldName v
+                                            }
+                                        )
+
+                        _ ->
+                            Nothing
+            in
+            case cond of
+                OperatorApplication "==" _ lchild rchild ->
+                    let
+                        inferenceAndValues =
+                            Maybe.map2 Tuple.pair
+                                (nodeToInference lchild)
+                                (Value.getValue rchild current)
+                                |> Maybe.Extra.orElseLazy
+                                    (\_ ->
+                                        Maybe.map2 Tuple.pair
+                                            (nodeToInference rchild)
+                                            (Value.getValue lchild current)
                                     )
+                    in
+                    case inferenceAndValues of
+                        Just ( toInference, value ) ->
+                            [ ( trueRange
+                              , toInference value
                               )
                             , ( falseRange
-                              , Dict.singleton name
-                                    (Value.Record
-                                        { isComplete = False
-                                        , fields = Dict.singleton fieldName inverted
-                                        }
-                                    )
+                              , toInference (Value.invert value)
                               )
                             ]
 
-                        RecordAccess (Node _ (FunctionOrValue moduleName name)) (Node _ fieldName) ->
+                        Nothing ->
                             let
                                 _ =
                                     Debug.todo <|
-                                        String.join "." moduleName
-                                            ++ "."
-                                            ++ name
-                                            ++ "."
-                                            ++ fieldName
+                                        "At line "
+                                            ++ String.fromInt condRange.start.row
+                                            ++ ": "
+                                            ++ Syntax.expressionToString lchild
                                             ++ " == "
-                                            ++ Debug.toString rvalue
+                                            ++ Syntax.expressionToString rchild
                             in
                             []
 
+                OperatorApplication "<" _ (Node _ lchild) rchild ->
+                    case lchild of
                         _ ->
                             let
                                 _ =
-                                    Debug.todo <|
-                                        Debug.toString lchild
-                                            ++ " == "
-                                            ++ Debug.toString rvalue
+                                    Debug.todo
                             in
                             []
 
-        _ ->
-            let
-                _ =
-                    Debug.todo
-            in
-            []
+                _ ->
+                    let
+                        _ =
+                            Debug.todo
+                    in
+                    []
 
 
 tryValue : Node Expression -> Inferred -> Maybe String

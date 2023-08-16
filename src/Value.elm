@@ -226,7 +226,7 @@ getValue (Node range expression) context =
                         _ ->
                             let
                                 _ =
-                                    if Dict.isEmpty context || op == "<" then
+                                    if Dict.isEmpty context then
                                         Debug.todo
 
                                     else
