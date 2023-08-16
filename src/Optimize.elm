@@ -10,11 +10,13 @@ import Dict exposing (Dict)
 import Elm.Syntax.Expression exposing (Expression(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
+import Interval
 import Maybe.Extra
 import RangeDict exposing (RangeDict)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
 import Syntax
+import Union
 import Value exposing (Value)
 
 
@@ -260,25 +262,35 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                 isLessThan : { equal : Bool } -> Value -> Maybe Value
                 isLessThan { equal } value =
                     Value.getMax value
-                        |> Maybe.andThen
-                            (\( high, highEq ) ->
-                                if isInfinite high then
-                                    Nothing
+                        |> Maybe.map
+                            (\high ->
+                                Interval.interval
+                                    (Interval.excludes (-1 / 0))
+                                    (if high.open || not equal then
+                                        Interval.excludes high.value
 
-                                else
-                                    Just <| Value.number [ ( ( -1 / 0, False ), ( high, highEq && equal ) ) ]
+                                     else
+                                        Interval.includes high.value
+                                    )
+                                    |> Union.fromInterval
+                                    |> Value.Number
                             )
 
                 isMoreThan : { equal : Bool } -> Value -> Maybe Value
                 isMoreThan { equal } value =
                     Value.getMin value
-                        |> Maybe.andThen
-                            (\( low, lowEq ) ->
-                                if isInfinite low then
-                                    Nothing
+                        |> Maybe.map
+                            (\low ->
+                                Interval.interval
+                                    (if low.open || not equal then
+                                        Interval.excludes low.value
 
-                                else
-                                    Just <| Value.number [ ( ( low, lowEq && equal ), ( 1 / 0, False ) ) ]
+                                     else
+                                        Interval.includes low.value
+                                    )
+                                    (Interval.excludes (1 / 0))
+                                    |> Union.fromInterval
+                                    |> Value.Number
                             )
 
                 disequation :

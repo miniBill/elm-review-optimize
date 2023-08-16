@@ -1,20 +1,19 @@
-module Value exposing (Bound, CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, number, singleToString, toSingle)
+module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
 
 import Dict exposing (Dict)
 import Elm.Syntax.Expression as Expression
 import Elm.Syntax.Node exposing (Node(..))
+import Interval exposing (Interval)
+import Interval.Extra as Interval exposing (Bound)
 import List.Extra
 import Set exposing (Set)
 import Syntax
+import Union exposing (Union)
+import Union.Extra as Union
 
 
 type Value
-    = -- For a number x
-      Number
-        -- Every `((l, le), (r, re))` means `l < x < r` is possible
-        -- (with left/right equality if le/re are True).
-        -- _l/r could be Infinity_
-        (List ( Bound, Bound ))
+    = Number Union
     | String StringValue
     | Char CharValue
     | Record { isComplete : Bool, fields : Dict String Value }
@@ -41,22 +40,22 @@ type CharValue
     | NoneOfChars (Set Char)
 
 
-type alias Bound =
-    ( Float, Bool )
-
-
 toSingle : Value -> Maybe SingleValue
 toSingle value =
     case value of
-        Number [ ( ( l, True ), ( r, True ) ) ] ->
-            if l == r then
-                Just <| SNumber l
+        Number ranges ->
+            case Union.toIntervals ranges of
+                [ interval ] ->
+                    case Interval.unpack interval of
+                        ( low, high ) ->
+                            if low.value == high.value && not low.open && not high.open then
+                                Just <| SNumber low.value
 
-            else
-                Nothing
+                            else
+                                Nothing
 
-        Number _ ->
-            Nothing
+                _ ->
+                    Nothing
 
         String (OneOfStrings s) ->
             case Set.toList s of
@@ -158,13 +157,13 @@ getValue (Node range expression) context =
             Just (Char (OneOfChars <| Set.singleton c))
 
         Expression.Integer i ->
-            Just (number [ ( ( toFloat i, True ), ( toFloat i, True ) ) ])
+            Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat i
 
         Expression.Hex h ->
-            Just (number [ ( ( toFloat h, True ), ( toFloat h, True ) ) ])
+            Just <| Number <| Union.fromInterval <| Interval.degenerate <| toFloat h
 
         Expression.Floatable f ->
-            Just (number [ ( ( f, True ), ( f, True ) ) ])
+            Just <| Number <| Union.fromInterval <| Interval.degenerate f
 
         Expression.FunctionOrValue [] name ->
             Dict.get name context
@@ -185,12 +184,8 @@ getValue (Node range expression) context =
                     )
 
         Expression.Negation child ->
-            case getValue child context of
-                Just (Number ranges) ->
-                    Just <| number <| List.map negateRange ranges
-
-                _ ->
-                    Nothing
+            getValue child context
+                |> Maybe.andThen (numericOp Interval.negate)
 
         Expression.ParenthesizedExpression child ->
             getValue child context
@@ -265,18 +260,10 @@ getValue (Node range expression) context =
                                 Nothing
 
                         "+" ->
-                            numericOp2
-                                (\( ( llow, llowEq ), ( lhigh, lhighEq ) ) ( ( rlow, rlowEq ), ( rhigh, rhighEq ) ) ->
-                                    ( ( llow + rlow
-                                      , llowEq && rlowEq
-                                      )
-                                    , ( lhigh + rhigh
-                                      , lhighEq && rhighEq
-                                      )
-                                    )
-                                )
-                                lvalue
-                                rvalue
+                            numericOp2 Interval.plus lvalue rvalue
+
+                        "-" ->
+                            numericOp2 Interval.minus lvalue rvalue
 
                         _ ->
                             let
@@ -363,10 +350,34 @@ getValue (Node range expression) context =
             Nothing
 
 
+numericOp : (Interval -> Interval) -> Value -> Maybe Value
+numericOp f lvalue =
+    case lvalue of
+        Number ranges ->
+            Just <| Number <| Union.fromIntervals <| List.map f <| Union.toIntervals ranges
+
+        _ ->
+            Nothing
+
+
+numericOp2 :
+    (Interval -> Interval -> Interval)
+    -> Value
+    -> Value
+    -> Maybe Value
+numericOp2 f lvalue rvalue =
+    case ( lvalue, rvalue ) of
+        ( Number lranges, Number rranges ) ->
+            Just <| Number <| Union.fromIntervals <| List.Extra.lift2 f (Union.toIntervals lranges) (Union.toIntervals rranges)
+
+        _ ->
+            Nothing
+
+
 isMoreThanOrEqualTo : Value -> Value -> Bool
 isMoreThanOrEqualTo lvalue rvalue =
     Maybe.map2
-        (\( l, _ ) ( r, _ ) -> l >= r)
+        (\l r -> l.value >= r.value)
         (getMin lvalue)
         (getMax rvalue)
         |> Maybe.withDefault False
@@ -375,9 +386,9 @@ isMoreThanOrEqualTo lvalue rvalue =
 isMoreThan : Value -> Value -> Bool
 isMoreThan lvalue rvalue =
     Maybe.map2
-        (\( l, leq ) ( r, req ) ->
-            (l > r)
-                || (l == r && (not leq || not req))
+        (\l r ->
+            (l.value > r.value)
+                || (l.value == r.value && (l.open || r.open))
         )
         (getMin lvalue)
         (getMax rvalue)
@@ -387,7 +398,7 @@ isMoreThan lvalue rvalue =
 isLessThanOrEqualTo : Value -> Value -> Bool
 isLessThanOrEqualTo lvalue rvalue =
     Maybe.map2
-        (\( l, _ ) ( r, _ ) -> l <= r)
+        (\l r -> l.value <= r.value)
         (getMax lvalue)
         (getMin rvalue)
         |> Maybe.withDefault False
@@ -396,57 +407,30 @@ isLessThanOrEqualTo lvalue rvalue =
 isLessThan : Value -> Value -> Bool
 isLessThan lvalue rvalue =
     Maybe.map2
-        (\( l, leq ) ( r, req ) ->
-            (l < r)
-                || (l == r && (not leq || not req))
+        (\l r ->
+            (l.value < r.value)
+                || (l.value == r.value && (l.open || r.open))
         )
         (getMax lvalue)
         (getMin rvalue)
         |> Maybe.withDefault False
 
 
-numericOp :
-    (( Bound, Bound ) -> ( Bound, Bound ))
-    -> Value
-    -> Maybe Value
-numericOp f lvalue =
-    case lvalue of
-        Number ranges ->
-            Just <| number <| List.map f ranges
-
-        _ ->
-            Nothing
-
-
-numericOp2 :
-    (( Bound, Bound ) -> ( Bound, Bound ) -> ( Bound, Bound ))
-    -> Value
-    -> Value
-    -> Maybe Value
-numericOp2 f lvalue rvalue =
-    case ( lvalue, rvalue ) of
-        ( Number lranges, Number rranges ) ->
-            Just <| number <| List.Extra.lift2 f lranges rranges
-
-        _ ->
-            Nothing
-
-
-getMax : Value -> Maybe ( Float, Bool )
+getMax : Value -> Maybe Bound
 getMax value =
     case value of
         Number ranges ->
-            Maybe.map Tuple.second (List.Extra.last ranges)
+            Union.upperBound ranges
 
         _ ->
             Nothing
 
 
-getMin : Value -> Maybe ( Float, Bool )
+getMin : Value -> Maybe Bound
 getMin value =
     case value of
         Number ranges ->
-            Maybe.map Tuple.first (List.head ranges)
+            Union.lowerBound ranges
 
         _ ->
             Nothing
@@ -566,12 +550,7 @@ union lval rval =
             Nothing
 
         ( Number lranges, Number rranges ) ->
-            let
-                _ =
-                    --dedup
-                    Debug.todo
-            in
-            Just <| number <| lranges ++ rranges
+            Just <| Number <| Union.union lranges rranges
 
         ( Number _, _ ) ->
             Nothing
@@ -609,9 +588,7 @@ intersect lval rval =
             Nothing
 
         ( Number lranges, Number rranges ) ->
-            intersectRanges lranges rranges
-                |> number
-                |> Just
+            Just <| Number <| Union.intersection lranges rranges
 
         ( Number _, _ ) ->
             Nothing
@@ -711,22 +688,6 @@ intersect lval rval =
                 |> Just
 
 
-intersectRanges : List ( Bound, Bound ) -> List ( Bound, Bound ) -> List ( Bound, Bound )
-intersectRanges lranges rranges =
-    -- This assumes that ranges are sorted
-    case lranges of
-        [] ->
-            []
-
-        ( ( llow, llowEq ), ( lhigh, lhighEq ) ) :: ltail ->
-            case rranges of
-                [] ->
-                    []
-
-                ( ( rlow, rlowEq ), ( rhigh, rhighEq ) ) :: rtail ->
-                    Debug.todo "intersectRanges"
-
-
 intersectDicts : Dict String Value -> Dict String Value -> Maybe (Dict String Value)
 intersectDicts ldict rdict =
     Dict.merge
@@ -742,16 +703,6 @@ intersectDicts ldict rdict =
         (Just Dict.empty)
 
 
-negateRange : ( Bound, Bound ) -> ( Bound, Bound )
-negateRange ( l, h ) =
-    let
-        negateBound : Bound -> Bound
-        negateBound ( x, e ) =
-            ( -x, e )
-    in
-    ( negateBound h, negateBound l )
-
-
 invert : Value -> Value
 invert value =
     case value of
@@ -759,18 +710,16 @@ invert value =
             -- x /= () doesn't make sense
             Unit
 
-        Number [ ( ( low, lowEq ), ( high, highEq ) ) ] ->
-            number
-                [ ( ( -1 / 0, False )
-                  , ( low, not lowEq )
-                  )
-                , ( ( high, not highEq )
-                  , ( 1 / 0, False )
-                  )
-                ]
-
-        Number _ ->
-            Debug.todo "branch 'Number _' not implemented"
+        Number ranges ->
+            let
+                everything : Union
+                everything =
+                    Interval.interval
+                        (Interval.excludes (-1 / 0))
+                        (Interval.excludes (1 / 0))
+                        |> Union.fromInterval
+            in
+            Number (Union.subtractUnions everything ranges)
 
         String (OneOfStrings options) ->
             String (NoneOfStrings options)
@@ -792,22 +741,3 @@ invert value =
                 { isComplete = isComplete
                 , fields = Dict.map (\_ -> invert) fields
                 }
-
-
-number : List ( Bound, Bound ) -> Value
-number bounds =
-    let
-        clean : List ( Bound, Bound )
-        clean =
-            bounds
-                |> List.filter
-                    (\( ( low, lowEq ), ( high, highEq ) ) ->
-                        low < high || (lowEq && highEq)
-                    )
-                |> List.sortBy (\( ( low, _ ), _ ) -> low)
-    in
-    if List.any (\( _, ( high, _ ) ) -> isInfinite high && high < 0) clean then
-        Debug.todo "Wrong high bound"
-
-    else
-        Number clean
