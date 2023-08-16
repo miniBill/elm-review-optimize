@@ -289,7 +289,6 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                                     )
                                     |> Union.fromInterval
                                     |> Value.Number
-                                    |> MyDebug.log "isLessThan"
                             )
 
                 isMoreThan : { equal : Bool } -> Value -> Maybe Value
@@ -307,7 +306,6 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                                     (Interval.excludes (1 / 0))
                                     |> Union.fromInterval
                                     |> Value.Number
-                                    |> MyDebug.log "isMoreThan"
                             )
 
                 disequation :

@@ -23,8 +23,9 @@ warn msg default =
 
 
 logIndent : Int -> String -> a -> a
-logIndent indent msg =
-    log (String.repeat indent "  " ++ msg)
+logIndent indent msg value =
+    --  log (String.repeat indent "  " ++ msg) value
+    value
 
 
 logWrap : Int -> String -> (Int -> a) -> a
