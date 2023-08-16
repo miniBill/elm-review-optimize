@@ -238,30 +238,91 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
 
                         _ ->
                             Nothing
+
+                inferenceAndValue :
+                    Node Expression
+                    -> Node Expression
+                    -> Maybe ( Value -> Dict String Value, Value )
+                inferenceAndValue ichild vchild =
+                    Maybe.map2 Tuple.pair
+                        (nodeToInference ichild)
+                        (Value.getValue vchild current)
+
+                branches toInference value =
+                    [ ( trueRange
+                      , toInference value
+                      )
+                    , ( falseRange
+                      , toInference (Value.invert value)
+                      )
+                    ]
+
+                isLessThan : { equal : Bool } -> Value -> Maybe Value
+                isLessThan { equal } value =
+                    Value.getMax value
+                        |> Maybe.andThen
+                            (\( high, highEq ) ->
+                                if isInfinite high then
+                                    Nothing
+
+                                else
+                                    Just <| Value.number [ ( ( -1 / 0, False ), ( high, highEq && equal ) ) ]
+                            )
+
+                isMoreThan : { equal : Bool } -> Value -> Maybe Value
+                isMoreThan { equal } value =
+                    Value.getMin value
+                        |> Maybe.andThen
+                            (\( low, lowEq ) ->
+                                if isInfinite low then
+                                    Nothing
+
+                                else
+                                    Just <| Value.number [ ( ( low, lowEq && equal ), ( 1 / 0, False ) ) ]
+                            )
+
+                disequation :
+                    { equal : Bool }
+                    -> ({ equal : Bool } -> Value -> Maybe Value)
+                    -> ({ equal : Bool } -> Value -> Maybe Value)
+                    -> Node Expression
+                    -> Node Expression
+                    -> List ( Range, Dict String Value )
+                disequation equal straight reversed lchild rchild =
+                    case inferenceAndValue lchild rchild of
+                        Just ( toInference, rvalue ) ->
+                            case straight equal rvalue of
+                                Nothing ->
+                                    []
+
+                                Just f ->
+                                    branches toInference f
+
+                        Nothing ->
+                            case inferenceAndValue rchild lchild of
+                                Just ( toInference, lvalue ) ->
+                                    case reversed equal lvalue of
+                                        Nothing ->
+                                            []
+
+                                        Just f ->
+                                            branches toInference f
+
+                                Nothing ->
+                                    []
             in
             case cond of
                 OperatorApplication "==" _ lchild rchild ->
                     let
+                        inferenceAndValues : Maybe ( Value -> Dict String Value, Value )
                         inferenceAndValues =
-                            Maybe.map2 Tuple.pair
-                                (nodeToInference lchild)
-                                (Value.getValue rchild current)
+                            inferenceAndValue lchild rchild
                                 |> Maybe.Extra.orElseLazy
-                                    (\_ ->
-                                        Maybe.map2 Tuple.pair
-                                            (nodeToInference rchild)
-                                            (Value.getValue lchild current)
-                                    )
+                                    (\_ -> inferenceAndValue lchild rchild)
                     in
                     case inferenceAndValues of
                         Just ( toInference, value ) ->
-                            [ ( trueRange
-                              , toInference value
-                              )
-                            , ( falseRange
-                              , toInference (Value.invert value)
-                              )
-                            ]
+                            branches toInference value
 
                         Nothing ->
                             let
@@ -276,14 +337,17 @@ visitIfBlock ((Node condRange cond) as condNode) (Node trueRange _) (Node falseR
                             in
                             []
 
-                OperatorApplication "<" _ (Node _ lchild) rchild ->
-                    case lchild of
-                        _ ->
-                            let
-                                _ =
-                                    Debug.todo
-                            in
-                            []
+                OperatorApplication "<" _ lchild rchild ->
+                    disequation { equal = False } isLessThan isMoreThan lchild rchild
+
+                OperatorApplication "<=" _ lchild rchild ->
+                    disequation { equal = True } isLessThan isMoreThan lchild rchild
+
+                OperatorApplication ">" _ lchild rchild ->
+                    disequation { equal = False } isMoreThan isLessThan lchild rchild
+
+                OperatorApplication ">=" _ lchild rchild ->
+                    disequation { equal = True } isMoreThan isLessThan lchild rchild
 
                 _ ->
                     let
