@@ -1,17 +1,16 @@
 module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
 
+import Bound exposing (Bound)
 import Dict exposing (Dict)
 import Elm.Syntax.Expression as Expression
 import Elm.Syntax.Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Location, Range)
 import Interval exposing (Interval)
-import Interval.Extra as Interval exposing (Bound)
 import List.Extra
 import MyDebug
 import Set exposing (Set)
 import Syntax
 import Union exposing (Union)
-import Union.Extra as Union
 
 
 type Value
@@ -48,13 +47,18 @@ toSingle value =
         Number ranges ->
             case Union.toIntervals ranges of
                 [ interval ] ->
-                    case Interval.unpack interval of
-                        ( low, high ) ->
-                            if low.value == high.value && not low.open && not high.open then
-                                Just <| SNumber low.value
+                    let
+                        low =
+                            Interval.leftBound interval
 
-                            else
-                                Nothing
+                        high =
+                            Interval.rightBound interval
+                    in
+                    if low.value == high.value && not low.open && not high.open then
+                        Just <| SNumber low.value
+
+                    else
+                        Nothing
 
                 _ ->
                     Nothing
