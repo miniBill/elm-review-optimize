@@ -1,5 +1,5 @@
 {
     "git-dependencies": {
-        "git@github.com:miniBill/elm-interval.git": "1.0.0 <= v < 2.0.0"
+        "git@github.com:miniBill/elm-interval.git": "eb12f4b15e401f2f211d5f2ad4a22487f1ed203e"
     }
 }
