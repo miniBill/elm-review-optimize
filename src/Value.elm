@@ -345,11 +345,8 @@ locationToString location =
 
 contextToString : Dict String Value -> String
 contextToString context =
-    context
-        |> Dict.toList
-        |> List.map (\( k, v ) -> k ++ " = " ++ toString v ++ " ")
-        |> String.join ","
-        |> (\s -> "( " ++ s ++ ")")
+    formatList "(" (Dict.toList context) ")" <|
+        \( k, v ) -> k ++ " = " ++ toString v
 
 
 toString : Value -> String
@@ -361,14 +358,25 @@ toString value =
         Number ranges ->
             "Number " ++ Union.unionToString ranges
 
-        String _ ->
-            MyDebug.todo "branch 'String _' not implemented" "TODO"
+        String (OneOfStrings options) ->
+            formatList "OneOf [" (Set.toList options) "]" identity
 
-        Char _ ->
-            MyDebug.todo "branch 'Char _' not implemented" "TODO"
+        String (NoneOfStrings options) ->
+            formatList "NoneOf [" (Set.toList options) "]" identity
 
-        Record _ ->
-            MyDebug.todo "branch 'Record _' not implemented" "TODO"
+        Char (OneOfChars options) ->
+            formatList "OneOf [" (Set.toList options) "]" String.fromChar
+
+        Char (NoneOfChars options) ->
+            formatList "NoneOf [" (Set.toList options) "]" String.fromChar
+
+        Record { fields } ->
+            let
+                viewField : ( String, Value ) -> String
+                viewField ( fieldName, fieldValue ) =
+                    fieldName ++ ": " ++ toString fieldValue
+            in
+            formatList "{" (Dict.toList fields) "}" viewField
 
         Bool b ->
             if b then
@@ -376,6 +384,11 @@ toString value =
 
             else
                 "Bool False"
+
+
+formatList : String -> List a -> String -> (a -> String) -> String
+formatList before items after inner =
+    before ++ " " ++ String.join "," (List.map (\item -> inner item ++ " ") items) ++ after
 
 
 numericOp : (Interval -> Interval) -> Value -> Maybe Value
@@ -481,10 +494,9 @@ booleanOp2 f l r =
 getValueForEquals : Value -> Value -> Maybe Value
 getValueForEquals lvalue rvalue =
     let
+        optionsToString : Set String -> String
         optionsToString options =
-            options
-                |> Set.toList
-                |> String.join ", "
+            formatList "[" (Set.toList options) "]" identity
     in
     case ( lvalue, rvalue ) of
         ( String (NoneOfStrings loptions), String (OneOfStrings roptions) ) ->
