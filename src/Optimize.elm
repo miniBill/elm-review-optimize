@@ -6,6 +6,7 @@ module Optimize exposing (rule)
 
 -}
 
+import Bound
 import Dict exposing (Dict)
 import Elm.Syntax.Expression exposing (Expression(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
@@ -279,13 +280,12 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                     Value.getMax value
                         |> Maybe.map
                             (\high ->
-                                Interval.interval
-                                    (Interval.excludes (-1 / 0))
-                                    (if high.open || not equal then
-                                        Interval.excludes high.value
+                                Interval.rightBounded
+                                    (if Bound.isOpen high || not equal then
+                                        Interval.excludes <| Bound.value high
 
                                      else
-                                        Interval.includes high.value
+                                        Interval.includes <| Bound.value high
                                     )
                                     |> Union.fromInterval
                                     |> Value.Number
@@ -296,14 +296,13 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                     Value.getMin value
                         |> Maybe.map
                             (\low ->
-                                Interval.interval
-                                    (if low.open || not equal then
-                                        Interval.excludes low.value
+                                Interval.leftBounded
+                                    (if Bound.isOpen low || not equal then
+                                        Interval.excludes <| Bound.value low
 
                                      else
-                                        Interval.includes low.value
+                                        Interval.includes <| Bound.value low
                                     )
-                                    (Interval.excludes (1 / 0))
                                     |> Union.fromInterval
                                     |> Value.Number
                             )

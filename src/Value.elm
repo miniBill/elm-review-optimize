@@ -1,12 +1,13 @@
 module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
 
-import Bound exposing (Bound)
+import Bound exposing (Bound(..))
 import Dict exposing (Dict)
 import Elm.Syntax.Expression as Expression
 import Elm.Syntax.Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Location, Range)
 import Interval exposing (Interval)
 import List.Extra
+import Maybe.Extra
 import MyDebug
 import Set exposing (Set)
 import Syntax
@@ -47,18 +48,21 @@ toSingle value =
         Number ranges ->
             case Union.toIntervals ranges of
                 [ interval ] ->
-                    let
-                        low =
-                            Interval.leftBound interval
+                    Maybe.Extra.andThen2
+                        (\low high ->
+                            case ( low, high ) of
+                                ( Inclusive lowValue, Inclusive highValue ) ->
+                                    if lowValue == highValue then
+                                        Just <| SNumber lowValue
 
-                        high =
-                            Interval.rightBound interval
-                    in
-                    if low.value == high.value && not low.open && not high.open then
-                        Just <| SNumber low.value
+                                    else
+                                        Nothing
 
-                    else
-                        Nothing
+                                _ ->
+                                    Nothing
+                        )
+                        (Interval.leftBound interval)
+                        (Interval.rightBound interval)
 
                 _ ->
                     Nothing
@@ -422,7 +426,7 @@ numericOp2 f lvalue rvalue =
 isMoreThanOrEqualTo : Value -> Value -> Bool
 isMoreThanOrEqualTo lvalue rvalue =
     Maybe.map2
-        (\l r -> l.value >= r.value)
+        (\l r -> Bound.value l >= Bound.value r)
         (getMin lvalue)
         (getMax rvalue)
         |> Maybe.withDefault False
@@ -432,8 +436,17 @@ isMoreThan : Value -> Value -> Bool
 isMoreThan lvalue rvalue =
     Maybe.map2
         (\l r ->
-            (l.value > r.value)
-                || (l.value == r.value && (l.open || r.open))
+            let
+                lValue : Float
+                lValue =
+                    Bound.value l
+
+                rValue : Float
+                rValue =
+                    Bound.value r
+            in
+            (lValue > rValue)
+                || (lValue == rValue && (Bound.isOpen l || Bound.isOpen r))
         )
         (getMin lvalue)
         (getMax rvalue)
@@ -443,7 +456,7 @@ isMoreThan lvalue rvalue =
 isLessThanOrEqualTo : Value -> Value -> Bool
 isLessThanOrEqualTo lvalue rvalue =
     Maybe.map2
-        (\l r -> l.value <= r.value)
+        (\l r -> Bound.value l <= Bound.value r)
         (getMax lvalue)
         (getMin rvalue)
         |> Maybe.withDefault False
@@ -453,8 +466,17 @@ isLessThan : Value -> Value -> Bool
 isLessThan lvalue rvalue =
     Maybe.map2
         (\l r ->
-            (l.value < r.value)
-                || (l.value == r.value && (l.open || r.open))
+            let
+                lValue : Float
+                lValue =
+                    Bound.value l
+
+                rValue : Float
+                rValue =
+                    Bound.value r
+            in
+            (lValue < rValue)
+                || (lValue == rValue && (Bound.isOpen l || Bound.isOpen r))
         )
         (getMax lvalue)
         (getMin rvalue)
