@@ -644,17 +644,29 @@ union lval rval =
         ( String (NoneOfStrings ls), String (NoneOfStrings rs) ) ->
             Just <| String <| NoneOfStrings <| Set.intersect ls rs
 
-        ( String _, String _ ) ->
-            MyDebug.todo "branch '( String _, String _ )' not implemented" Nothing
+        ( String (OneOfStrings ls), String (NoneOfStrings rs) ) ->
+            Just <| String <| NoneOfStrings <| Set.diff rs ls
 
-        ( _, String _ ) ->
-            Nothing
+        ( String (NoneOfStrings ls), String (OneOfStrings rs) ) ->
+            Just <| String <| NoneOfStrings <| Set.diff ls rs
 
         ( String _, _ ) ->
             Nothing
 
-        ( Char _, Char _ ) ->
-            MyDebug.todo "branch '( Char _, Char _ )' not implemented" Nothing
+        ( _, String _ ) ->
+            Nothing
+
+        ( Char (OneOfChars ls), Char (OneOfChars rs) ) ->
+            Just <| Char <| OneOfChars <| Set.union ls rs
+
+        ( Char (NoneOfChars ls), Char (NoneOfChars rs) ) ->
+            Just <| Char <| NoneOfChars <| Set.intersect ls rs
+
+        ( Char (OneOfChars ls), Char (NoneOfChars rs) ) ->
+            Just <| Char <| NoneOfChars <| Set.diff rs ls
+
+        ( Char (NoneOfChars ls), Char (OneOfChars rs) ) ->
+            Just <| Char <| NoneOfChars <| Set.diff ls rs
 
 
 intersect : Value -> Value -> Maybe Value
