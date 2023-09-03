@@ -61,8 +61,8 @@ toSingle value =
                                 _ ->
                                     Nothing
                         )
-                        (Interval.leftBound interval)
-                        (Interval.rightBound interval)
+                        (Interval.lowerBound interval)
+                        (Interval.upperBound interval)
 
                 _ ->
                     Nothing
