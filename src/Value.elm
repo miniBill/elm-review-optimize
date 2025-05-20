@@ -307,14 +307,56 @@ getValue indent ((Node range expression) as node) context =
                 Expression.ListExpr _ ->
                     MyDebug.warn "getValue > ListExpr" Nothing
 
-                Expression.LetExpression _ ->
-                    MyDebug.warn "getValue > LetExpression" Nothing
+                Expression.LetExpression letBlock ->
+                    let
+                        unpacked : Dict String Value
+                        unpacked =
+                            letBlock.declarations
+                                |> List.map unpackDeclaration
+                                |> Maybe.Extra.values
+                                |> Dict.fromList
+
+                        unpackDeclaration : Node Expression.LetDeclaration -> Maybe ( String, Value )
+                        unpackDeclaration (Node _ declaration) =
+                            case declaration of
+                                Expression.LetFunction function ->
+                                    let
+                                        (Node _ functionDeclaration) =
+                                            function.declaration
+                                    in
+                                    if List.isEmpty functionDeclaration.arguments then
+                                        getValue indent_ functionDeclaration.expression context
+                                            |> Maybe.map
+                                                (Tuple.pair
+                                                    (Elm.Syntax.Node.value functionDeclaration.name)
+                                                )
+
+                                    else
+                                        Nothing
+
+                                Expression.LetDestructuring _ _ ->
+                                    MyDebug.warn "getValue > LetDestructuring" Nothing
+                    in
+                    getValue indent_ letBlock.expression (Dict.union unpacked context)
 
                 Expression.CaseExpression _ ->
                     MyDebug.warn "getValue > CaseExpression" Nothing
 
-                Expression.RecordExpr _ ->
-                    MyDebug.warn "getValue > RecordExpr" Nothing
+                Expression.RecordExpr setters ->
+                    setters
+                        |> Maybe.Extra.combineMap
+                            (\(Node _ ( Node _ key, value )) ->
+                                Maybe.map
+                                    (Tuple.pair key)
+                                    (getValue indent_ value context)
+                            )
+                        |> Maybe.map
+                            (\fields ->
+                                Record
+                                    { isComplete = True
+                                    , fields = Dict.fromList fields
+                                    }
+                            )
 
                 Expression.RecordUpdateExpression _ _ ->
                     MyDebug.warn "getValue > RecordUpdateExpression" Nothing

@@ -214,6 +214,9 @@ expressionVisitor ((Node range expression) as node) context =
                                 \indent_ ->
                                     push ( [], visitIfBlock indent_ cond true false current )
 
+                RecordExpr _ ->
+                    pushNothing []
+
                 _ ->
                     case tryValue indent node current of
                         Just value ->
