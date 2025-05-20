@@ -24,7 +24,8 @@
   },
   "license": "BSD-3-Clause",
   "devDependencies": {
-    "elm-git-install": "^0.1.4"
+    "elm-git-install": "^0.1.4",
+    "elm-test-rs": "^3.0.0-5"
   },
   "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
 }
