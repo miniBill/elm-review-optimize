@@ -1,4 +1,4 @@
-module Value exposing (CharValue(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
+module Value exposing (CharValue(..), IsUpdateOf(..), SingleValue(..), StringValue(..), Value(..), getMax, getMin, getValue, intersect, intersectDicts, invert, singleToString, toSingle)
 
 import Bound exposing (Bound(..))
 import Dict exposing (Dict)
@@ -18,9 +18,15 @@ type Value
     = Number Union
     | String StringValue
     | Char CharValue
-    | Record { isComplete : Bool, fields : Dict String Value }
+    | Record { isUpdateOf : IsUpdateOf, fields : Dict String Value }
     | Bool Bool
     | Unit
+
+
+type IsUpdateOf
+    = IsUpdateOf String
+    | IsUpdateOfUnknown
+    | IsNotUpdateOf
 
 
 type SingleValue
@@ -89,21 +95,25 @@ toSingle value =
         Char _ ->
             Nothing
 
-        Record { isComplete, fields } ->
-            if isComplete then
-                Dict.foldl
-                    (\k v acc ->
-                        Maybe.map2
-                            (Dict.insert k)
-                            (toSingle v)
-                            acc
-                    )
-                    (Just Dict.empty)
-                    fields
-                    |> Maybe.map SRecord
+        Record { isUpdateOf, fields } ->
+            case isUpdateOf of
+                IsUpdateOfUnknown ->
+                    Nothing
 
-            else
-                Nothing
+                IsUpdateOf _ ->
+                    Nothing
+
+                IsNotUpdateOf ->
+                    Dict.foldl
+                        (\k v acc ->
+                            Maybe.map2
+                                (Dict.insert k)
+                                (toSingle v)
+                                acc
+                        )
+                        (Just Dict.empty)
+                        fields
+                        |> Maybe.map SRecord
 
         Bool b ->
             Just <| SBool b
@@ -353,13 +363,45 @@ getValue indent ((Node range expression) as node) context =
                         |> Maybe.map
                             (\fields ->
                                 Record
-                                    { isComplete = True
+                                    { isUpdateOf = IsNotUpdateOf
                                     , fields = Dict.fromList fields
                                     }
                             )
 
-                Expression.RecordUpdateExpression _ _ ->
-                    MyDebug.warn "getValue > RecordUpdateExpression" Nothing
+                Expression.RecordUpdateExpression (Node r base) setters ->
+                    let
+                        settersValues =
+                            setters
+                                |> Maybe.Extra.combineMap
+                                    (\(Node _ ( Node _ key, value )) ->
+                                        Maybe.map
+                                            (Tuple.pair key)
+                                            (getValue indent_ value context)
+                                    )
+                    in
+                    case getValue indent_ (Node r (Expression.FunctionOrValue [] base)) context of
+                        Nothing ->
+                            settersValues
+                                |> Maybe.map
+                                    (\newFields ->
+                                        Record
+                                            { isUpdateOf = IsUpdateOf base
+                                            , fields = Dict.fromList newFields
+                                            }
+                                    )
+
+                        Just (Record { isUpdateOf, fields }) ->
+                            settersValues
+                                |> Maybe.map
+                                    (\newFields ->
+                                        Record
+                                            { isUpdateOf = isUpdateOf
+                                            , fields = Dict.union (Dict.fromList newFields) fields
+                                            }
+                                    )
+
+                        Just _ ->
+                            MyDebug.warn "getValue > RecordUpdateExpression [Just _]" Nothing
 
                 Expression.LambdaExpression _ ->
                     Nothing
@@ -694,8 +736,24 @@ union lval rval =
                         ( Dict.empty, True )
             in
             Record
-                { isComplete =
-                    (lr.isComplete || rr.isComplete) && completeFields
+                { isUpdateOf =
+                    if completeFields then
+                        case ( lr.isUpdateOf, rr.isUpdateOf ) of
+                            ( IsUpdateOf lu, IsUpdateOf ru ) ->
+                                if lu == ru then
+                                    IsUpdateOf lu
+
+                                else
+                                    IsUpdateOfUnknown
+
+                            ( IsNotUpdateOf, IsNotUpdateOf ) ->
+                                IsNotUpdateOf
+
+                            _ ->
+                                IsUpdateOfUnknown
+
+                    else
+                        IsUpdateOfUnknown
                 , fields = mergedFields
                 }
                 |> Just
@@ -781,10 +839,20 @@ intersect lval rval =
                 |> Maybe.map
                     (\fields ->
                         Record
-                            -- The || is counterintuitive but correct:
-                            -- if we know from either source that the record is complete
-                            -- then applying both constraints still makes it complete.
-                            { isComplete = lrecord.isComplete || rrecord.isComplete
+                            { isUpdateOf =
+                                case ( lrecord.isUpdateOf, rrecord.isUpdateOf ) of
+                                    ( IsNotUpdateOf, IsNotUpdateOf ) ->
+                                        IsNotUpdateOf
+
+                                    ( IsUpdateOf x, IsUpdateOf y ) ->
+                                        if x == y then
+                                            IsUpdateOf x
+
+                                        else
+                                            IsUpdateOfUnknown
+
+                                    _ ->
+                                        IsUpdateOfUnknown
                             , fields = fields
                             }
                     )
@@ -898,8 +966,8 @@ invert value =
         Bool b ->
             Bool (not b)
 
-        Record { isComplete, fields } ->
+        Record { isUpdateOf, fields } ->
             Record
-                { isComplete = isComplete
+                { isUpdateOf = isUpdateOf
                 , fields = Dict.map (\_ -> invert) fields
                 }

@@ -245,7 +245,7 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                                         \v ->
                                             Dict.singleton name
                                                 (Value.Record
-                                                    { isComplete = False
+                                                    { isUpdateOf = Value.IsUpdateOfUnknown
                                                     , fields = Dict.singleton fieldName v
                                                     }
                                                 )
@@ -385,8 +385,77 @@ visitIfBlock indent ((Node condRange cond) as condNode) (Node trueRange _) (Node
                 OperatorApplication ">=" _ lchild rchild ->
                     disequation indent { equal = True } isMoreThan isLessThan lchild rchild
 
-                _ ->
-                    MyDebug.warn "visitIfBlock" []
+                OperatorApplication op _ _ _ ->
+                    MyDebug.warn ("visitIfBlock > OperationApplication " ++ op) []
+
+                UnitExpr ->
+                    MyDebug.warn "visitIfBlock > UnitExpr" []
+
+                Application _ ->
+                    MyDebug.warn "visitIfBlock > Application" []
+
+                FunctionOrValue _ _ ->
+                    MyDebug.warn "visitIfBlock > FunctionOrValue" []
+
+                IfBlock _ _ _ ->
+                    MyDebug.warn "visitIfBlock > IfBlock" []
+
+                PrefixOperator _ ->
+                    MyDebug.warn "visitIfBlock > PrefixOperator" []
+
+                Operator _ ->
+                    MyDebug.warn "visitIfBlock > Operator" []
+
+                Integer _ ->
+                    MyDebug.warn "visitIfBlock > Integer" []
+
+                Hex _ ->
+                    MyDebug.warn "visitIfBlock > Hex" []
+
+                Floatable _ ->
+                    MyDebug.warn "visitIfBlock > Floatable" []
+
+                Negation _ ->
+                    MyDebug.warn "visitIfBlock > Negation" []
+
+                Literal _ ->
+                    MyDebug.warn "visitIfBlock > Literal" []
+
+                CharLiteral _ ->
+                    MyDebug.warn "visitIfBlock > CharLiteral" []
+
+                TupledExpression _ ->
+                    MyDebug.warn "visitIfBlock > TupledExpression" []
+
+                ParenthesizedExpression _ ->
+                    MyDebug.warn "visitIfBlock > ParenthesizedExpression" []
+
+                LetExpression _ ->
+                    MyDebug.warn "visitIfBlock > LetExpression" []
+
+                CaseExpression _ ->
+                    MyDebug.warn "visitIfBlock > CaseExpression" []
+
+                LambdaExpression _ ->
+                    MyDebug.warn "visitIfBlock > LambdaExpression" []
+
+                RecordExpr _ ->
+                    MyDebug.warn "visitIfBlock > RecordExpr" []
+
+                ListExpr _ ->
+                    MyDebug.warn "visitIfBlock > ListExpr" []
+
+                RecordAccess _ _ ->
+                    MyDebug.warn "visitIfBlock > RecordAccess" []
+
+                RecordAccessFunction _ ->
+                    MyDebug.warn "visitIfBlock > RecordAccessFunction" []
+
+                RecordUpdateExpression _ _ ->
+                    MyDebug.warn "visitIfBlock > RecordUpdateExpression" []
+
+                GLSLExpression _ ->
+                    MyDebug.warn "visitIfBlock > GLSLExpression" []
 
 
 tryValue : Int -> Node Expression -> Inferred -> Maybe String
