@@ -22,7 +22,7 @@ a =
 """
                     |> Review.Test.run rule
                     |> Review.Test.expectNoErrors
-        , test "should report an error when REPLACEME" <|
+        , test "should report an error when it can simplify a value" <|
             \() ->
                 """module A exposing (..)
 
